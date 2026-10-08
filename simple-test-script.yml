@@ -1,0 +1,138 @@
+---
+- name: Test Linux patching workflow
+  hosts: linux_servers
+  become: true
+  gather_facts: true
+
+  tasks:
+
+    # ==========================================================
+    # PRE-PATCHING
+    # ==========================================================
+
+    - name: PRE - Check server connectivity
+      ansible.builtin.ping:
+      register: ping_result
+
+    - name: PRE - Display server information
+      ansible.builtin.debug:
+        msg:
+          - "Hostname: {{ ansible_hostname }}"
+          - "OS: {{ ansible_distribution }}"
+          - "OS version: {{ ansible_distribution_version }}"
+          - "Kernel: {{ ansible_kernel }}"
+
+    - name: PRE - Check available disk space
+      ansible.builtin.shell: |
+        df -h /
+      register: disk_space
+      changed_when: false
+
+    - name: PRE - Display disk space
+      ansible.builtin.debug:
+        var: disk_space.stdout_lines
+
+    - name: PRE - Gather active services
+      ansible.builtin.service_facts:
+
+    - name: PRE - Display running services
+      ansible.builtin.debug:
+        msg: "{{ ansible_facts.services | dict2items
+                 | selectattr('value.state', 'equalto', 'running')
+                 | map(attribute='key')
+                 | list }}"
+
+    - name: PRE - Check available updates
+      ansible.builtin.shell: |
+        apt list --upgradable 2>/dev/null
+      register: updates_before
+      changed_when: false
+
+    - name: PRE - Display available updates
+      ansible.builtin.debug:
+        var: updates_before.stdout_lines
+
+
+    # ==========================================================
+    # PATCHING
+    # ==========================================================
+
+    - name: PATCH - Update APT package cache
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: PATCH - Install available updates
+      ansible.builtin.apt:
+        upgrade: dist
+        autoremove: false
+      register: patch_result
+
+    - name: PATCH - Display patch result
+      ansible.builtin.debug:
+        msg:
+          - "Changed: {{ patch_result.changed }}"
+          - "Result: {{ patch_result.msg | default('No additional message') }}"
+
+    - name: PATCH - Check if reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+
+    - name: PATCH - Reboot server if required
+      ansible.builtin.reboot:
+        msg: "Server rebooted after Ansible patching"
+        reboot_timeout: 600
+      when: reboot_required.stat.exists
+
+
+    # ==========================================================
+    # POST-PATCHING
+    # ==========================================================
+
+    - name: POST - Check server connectivity
+      ansible.builtin.ping:
+      register: post_ping
+
+    - name: POST - Check remaining updates
+      ansible.builtin.shell: |
+        apt list --upgradable 2>/dev/null
+      register: updates_after
+      changed_when: false
+
+    - name: POST - Display remaining updates
+      ansible.builtin.debug:
+        var: updates_after.stdout_lines
+
+    - name: POST - Gather active services
+      ansible.builtin.service_facts:
+
+    - name: POST - Display running services
+      ansible.builtin.debug:
+        msg: "{{ ansible_facts.services | dict2items
+                 | selectattr('value.state', 'equalto', 'running')
+                 | map(attribute='key')
+                 | list }}"
+
+    - name: POST - Check disk space
+      ansible.builtin.shell: |
+        df -h /
+      register: disk_space_after
+      changed_when: false
+
+    - name: POST - Display disk space
+      ansible.builtin.debug:
+        var: disk_space_after.stdout_lines
+
+    - name: POST - Display final result
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "PATCHING COMPLETED"
+          - "=========================================="
+          - "Server: {{ inventory_hostname }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Updates installed: {{ patch_result.changed }}"
+          - "Reboot required: {{ reboot_required.stat.exists }}"
+          - "Server reachable after patch: {{ post_ping.ping == 'pong' }}"
+          - "Remaining updates: {{ updates_after.stdout_lines | length }}"
+          - "=========================================="
