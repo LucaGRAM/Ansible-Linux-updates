@@ -136,3 +136,5 @@
           - "Server reachable after patch: {{ post_ping.ping == 'pong' }}"
           - "Remaining updates: {{ updates_after.stdout_lines | length }}"
           - "=========================================="
+
+# vmware tags mogelijk controleren
